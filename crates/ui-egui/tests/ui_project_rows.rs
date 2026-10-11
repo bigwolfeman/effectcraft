@@ -116,7 +116,7 @@ fn label_swatch_opens_the_label_menu() {
 fn footage_context_menu_interprets_the_footage() {
     let (mut h, _, _, solid) = harness();
     let footage = Footage { kind: FootageKind::Video, path: "clip.mp4".into(), width: 64, height: 36, has_video: true, ..Default::default() };
-    let clip = std::sync::Arc::make_mut(&mut h.state_mut().session.project).add_item("Clip", Default::default(), None, ItemKind::Footage(footage));
+    let clip = h.state_mut().session.project_mut().add_item("Clip", Default::default(), None, ItemKind::Footage(footage));
     h.run_steps(2);
     let right_click = |h: &mut Harness<'_, EffectcraftApp>, p: Pos2| {
         h.input_mut().events.push(Event::PointerMoved(p));

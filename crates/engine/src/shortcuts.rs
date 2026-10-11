@@ -69,7 +69,7 @@ fn ui_scope(id: &str) -> &'static str {
 
 /// Every bindable command: menu entries, registry commands outside the menus, then the
 /// frontend's own commands.
-pub fn bindables(ui: &[UiCommand]) -> Vec<Bindable> {
+pub fn bindables(ui: &[UiCommand], registry: &craft_command::Registry<crate::Session, crate::EngineError>) -> Vec<Bindable> {
     let mut out: Vec<Bindable> = vec![];
     let mut seen: HashMap<String, usize> = HashMap::new();
     let mut push = |b: Bindable, out: &mut Vec<Bindable>| {
@@ -102,23 +102,16 @@ pub fn bindables(ui: &[UiCommand]) -> Vec<Bindable> {
             &mut out,
         );
     }
-    for c in crate::command_specs() {
-        if !c.journal || entries.iter().any(|(_, e)| e.command == c.id) {
-            continue;
+    let mut journaled = Vec::new();
+    registry.for_each(|view| {
+        if !view.journal || entries.iter().any(|(_, e)| e.command == view.id) {
+            return;
         }
-        let defaults = c.shortcut.and_then(normalize).into_iter().collect();
-        push(
-            Bindable {
-                key: c.id.to_string(),
-                command: c.id.to_string(),
-                params: Value::Null,
-                label: c.label.to_string(),
-                path: vec!["Commands".into()],
-                scope: APP_SCOPE.into(),
-                defaults,
-            },
-            &mut out,
-        );
+        journaled.push((view.id.to_string(), view.label.to_string(), view.shortcut.map(str::to_string)));
+    });
+    for (id, label, shortcut) in journaled {
+        let defaults = shortcut.as_deref().and_then(normalize).into_iter().collect();
+        push(Bindable { key: id.clone(), command: id, params: Value::Null, label, path: vec!["Commands".into()], scope: APP_SCOPE.into(), defaults }, &mut out);
     }
     for c in ui {
         let scope = ui_scope(&c.id);
@@ -415,8 +408,8 @@ pub struct ShortcutTable {
 }
 
 impl ShortcutTable {
-    pub fn build(maps: &Keymaps, ui: &[UiCommand]) -> ShortcutTable {
-        let bindables = bindables(ui);
+    pub fn build(maps: &Keymaps, ui: &[UiCommand], registry: &craft_command::Registry<crate::Session, crate::EngineError>) -> ShortcutTable {
+        let bindables = bindables(ui, registry);
         let keys = bindables.iter().map(|b| (b.key.clone(), maps.keys_of(b))).collect();
         ShortcutTable { bindables, keys }
     }

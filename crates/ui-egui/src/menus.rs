@@ -273,6 +273,29 @@ fn no_params(p: &Value) -> bool {
 
 /// Execute a UI or engine command by id.
 pub fn invoke(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {
+    // Engine ids are gated inside `Session::execute`, including commands that emit `Event::Frontend`.
+    // This gate is only for ids execute does not resolve.
+    if app.session.registry.resolve(id).is_none() {
+        let gate = app.session.open_ui(id, &params)?;
+        let params = gate.params.clone();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| invoke_body(app, ctx, id, params)));
+        match result {
+            Ok(value) => {
+                let outcome = if value.is_ok() { effectcraft_engine::UiOutcome::Ok } else { effectcraft_engine::UiOutcome::Err };
+                app.session.close_ui(gate, outcome);
+                value
+            }
+            Err(payload) => {
+                app.session.close_ui(gate, effectcraft_engine::UiOutcome::Panicked);
+                std::panic::resume_unwind(payload)
+            }
+        }
+    } else {
+        invoke_body(app, ctx, id, params)
+    }
+}
+
+fn invoke_body(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {
     if no_params(&params) && app.ui.focused == PanelKind::Project {
         match id {
             "edit.duplicate" => return run_engine(app, ctx, "project.duplicate", json!({})),
@@ -1423,7 +1446,7 @@ pub(crate) fn entry_enabled(app: &EffectcraftApp, e: &MenuEntry) -> bool {
 
 /// Every menu entry, flattened with its submenu path.
 pub fn menu_items(app: &EffectcraftApp) -> Vec<MenuItem> {
-    effectcraft_engine::menus::entries()
+    let mut items: Vec<MenuItem> = effectcraft_engine::menus::entries()
         .into_iter()
         .map(|(path, e)| MenuItem {
             id: e.command.clone(),
@@ -1434,7 +1457,13 @@ pub fn menu_items(app: &EffectcraftApp) -> Vec<MenuItem> {
             checked: entry_checked(app, e),
             params: e.params.clone(),
         })
-        .collect()
+        .collect();
+    for (id, label, path) in app.session.dynamic_menu_rows() {
+        let shortcut = app.session.shortcuts().shortcut_of(&id, &Value::Null).map(str::to_string);
+        let enabled = app.session.is_enabled(&id);
+        items.push(MenuItem { id, label, path, shortcut, enabled, checked: None, params: Value::Null });
+    }
+    items
 }
 
 /// Shortcut text in this OS's notation (`⇧⌘K` on macOS, `Ctrl+Shift+K` elsewhere).

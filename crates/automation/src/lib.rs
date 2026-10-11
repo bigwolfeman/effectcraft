@@ -13,7 +13,7 @@
 //! Layering: depends on `effectcraft-engine` only (never egui); the CLI injects a fully wired
 //! session (`effectcraft_host::session()`).
 
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable))]
 
 mod autosave;
 pub mod backend;

@@ -3,7 +3,7 @@
 //! Render Queue export through `effectcraft-export` (FilmCraft's encoders). Frontends (desktop,
 //! CLI, MCP, web) start here.
 
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable))]
 
 use std::sync::Arc;
 

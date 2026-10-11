@@ -29,7 +29,7 @@
 //! This crate is L3 and does no file I/O: media files are probed through a callback, pre-rendered
 //! media come in as paths, and documents are bytes.
 
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable))]
 
 mod export;
 mod import;

@@ -453,7 +453,7 @@ fn lift_and_extract_work_area() {
 fn an_inverted_saved_work_area_takes_an_end_edit() {
     let mut s = comp();
     let cid = s.active_comp_id().unwrap();
-    std::sync::Arc::make_mut(&mut s.project).comp_mut(cid).unwrap().work_area = (Tick::from_seconds_f64(9.0), Tick::from_seconds_f64(2.0));
+    s.project_mut().comp_mut(cid).unwrap().work_area = (Tick::from_seconds_f64(9.0), Tick::from_seconds_f64(2.0));
     s.execute("comp.workArea", json!({"end": 1.0})).unwrap();
     s.execute("comp.workArea", json!({"start": 50.0})).unwrap();
     let c = s.active_comp().unwrap();
@@ -513,7 +513,7 @@ fn work_area_stays_ordered_when_the_start_passes_the_end() {
     let mut s = comp();
     let cid = s.state.active_comp.unwrap();
     {
-        let c = std::sync::Arc::make_mut(&mut s.project).comp_mut(cid).unwrap();
+        let c = s.project_mut().comp_mut(cid).unwrap();
         c.work_area = (Tick::from_seconds_f64(8.0), Tick::from_seconds_f64(2.0));
     }
     let err = s.execute("comp.trimToWorkArea", json!({})).unwrap_err();
@@ -702,13 +702,13 @@ fn consolidate_duplicate_footage() {
     let a = f(&mut s);
     let b = f(&mut s);
     // Give both the same file path.
-    let mut p = (*s.project).clone();
+    let mut p = (**s.project).clone();
     for id in [a, b] {
         if let Some(ItemKind::Footage(ft)) = p.item_mut(effectcraft_project::ItemId(id)).map(|i| &mut i.kind) {
             ft.path = "/media/shot.mov".into();
         }
     }
-    s.project = std::sync::Arc::new(p);
+    s.set_project(std::sync::Arc::new(p));
     s.execute("layer.addItem", json!({"item": b})).unwrap();
     assert_eq!(s.execute("file.consolidateFootage", json!({})).unwrap()["removed"], 1);
     let c = s.active_comp().unwrap();
@@ -996,7 +996,7 @@ fn new_comp_from_selection_is_one_undo_step_with_the_dialog_options() {
             has_video: true,
             ..Default::default()
         };
-        std::sync::Arc::make_mut(&mut s.project).add_item(name, effectcraft_color::Label::None, None, ItemKind::Footage(f))
+        s.project_mut().add_item(name, effectcraft_color::Label::None, None, ItemKind::Footage(f))
     };
     let a = still(&mut s, "a.png", 200, 1.0);
     let b = still(&mut s, "b.png", 300, 2.0);
@@ -1064,15 +1064,8 @@ fn project_files_keep_their_format_warn_about_newer_versions_and_never_save_unre
     // A value a project file can't hold: Save fails and the file on disk is left as it was.
     s.execute("file.open", json!({"path": path})).unwrap();
     let cid = s.state.active_comp.unwrap();
-    std::sync::Arc::make_mut(&mut s.project)
-        .comp_mut(cid)
-        .unwrap()
-        .layer_mut(effectcraft_project::LayerId(a))
-        .unwrap()
-        .props
-        .prop_mut("transform/opacity")
-        .unwrap()
-        .value = KV::Scalar(f64::NAN);
+    s.project_mut().comp_mut(cid).unwrap().layer_mut(effectcraft_project::LayerId(a)).unwrap().props.prop_mut("transform/opacity").unwrap().value =
+        KV::Scalar(f64::NAN);
     let e = s.execute("file.save", json!({})).unwrap_err().to_string();
     assert!(e.contains("can't be saved"), "{e}");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
@@ -1116,7 +1109,7 @@ fn new_comp_from_selection_survives_hostile_sequence_numbers() {
             has_video: true,
             ..Default::default()
         };
-        std::sync::Arc::make_mut(&mut s.project).add_item(name, effectcraft_color::Label::None, None, ItemKind::Footage(f))
+        s.project_mut().add_item(name, effectcraft_color::Label::None, None, ItemKind::Footage(f))
     };
     let a = still(&mut s, "a.png");
     let b = still(&mut s, "b.png");

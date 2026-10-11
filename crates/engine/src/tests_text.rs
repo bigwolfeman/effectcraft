@@ -156,7 +156,7 @@ fn presets_apply_render_and_round_trip() {
     s.execute("layer.enablePerChar3D", json!({"layer": t})).unwrap();
     let json = s.project.to_json();
     let back = Project::from_json(&json).unwrap();
-    assert_eq!(*s.project, back);
+    assert_eq!(**s.project, back);
     let tg = text_group(&s);
     for m in ["pathOptions", "moreOptions"] {
         assert!(tg.sub(m).is_some(), "{m}");

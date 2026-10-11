@@ -7,7 +7,7 @@
 //!
 //! Timecode (SMPTE drop/non-drop, frames, feet+frames, samples) is only a *display* of ticks.
 
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable))]
 
 use serde::{Deserialize, Serialize};
 use std::fmt;

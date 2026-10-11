@@ -1240,7 +1240,7 @@ mod tests {
         let mut s = Session::default();
         let cid = ItemId(s.execute("comp.new", json!({"name": "A", "width": 8, "height": 8, "duration": 1})).unwrap()["comp"].as_u64().unwrap());
         let clip = Footage { kind: FootageKind::Still, width: 8, height: 8, has_video: true, ..Default::default() };
-        let item = Arc::make_mut(&mut s.project).add_item("clip.png", Default::default(), None, ItemKind::Footage(clip));
+        let item = s.project_mut().add_item("clip.png", Default::default(), None, ItemKind::Footage(clip));
         s.execute("layer.addItem", json!({"item": item.0})).unwrap();
         let footage = Arc::new(Explodes::default());
         let src = RenderSource {
@@ -1311,7 +1311,7 @@ mod tests {
             duration: Tick::from_seconds_f64(10.0),
             ..Default::default()
         };
-        let item = Arc::make_mut(&mut s.project).add_item("clip.mov", Default::default(), None, ItemKind::Footage(clip));
+        let item = s.project_mut().add_item("clip.mov", Default::default(), None, ItemKind::Footage(clip));
         s.execute("layer.addItem", json!({"item": item.0})).unwrap();
         let footage = Arc::new(Parallel::default());
         let src = RenderSource {
@@ -1515,7 +1515,7 @@ mod tests {
         let a = ItemId(s.execute("comp.new", json!({"name": "A", "width": 8, "height": 8, "duration": 1})).unwrap()["comp"].as_u64().unwrap());
         // A project nothing else holds (no undo history): make_mut would edit the comp in place,
         // at the same address, if the identity hadn't kept a snapshot holding it.
-        let mut p = Arc::new((*s.project).clone());
+        let mut p = Arc::new((**s.project).clone());
         drop(s);
         let f = Frames::default();
         let before = f.content_of(&p, 1, a);

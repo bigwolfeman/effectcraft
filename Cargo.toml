@@ -120,6 +120,9 @@ sys-locale = "0.3"
 # filmcraft-aac = { path = "../filmcraft/crates/aac" }
 # filmcraft-isobmff = { path = "../filmcraft/crates/isobmff" }
 
+# Path dep: this artcraft checkout is not published, so a git rev does not exist yet.
+craft-command = { path = "../../../crates/command" }
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 

@@ -37,7 +37,7 @@
 //! `<comp>` is a comp id or name (`-` = the active comp); `<layer>` an id, `#n` or name; `<value>`
 //! is JSON (`50`, `[960,540]`, `"#ff0000"`) or a bare string. See `docs/agents.md`.
 
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable))]
 
 use std::io::Write;
 
@@ -444,10 +444,11 @@ fn run(cmd: &str, args: &Args, json_out: bool) -> Result<(), Failure> {
             let mut b = backend(args, true)?;
             let p = tool(&mut b, "get_project", json!({}))?;
             let comp = tool(&mut b, "get_comp", json!({})).ok();
+            let commands = b.session().map(|session| session.command_count()).unwrap_or_else(|| effectcraft_engine::command_specs().len());
             let info = json!({
                 "version": env!("CARGO_PKG_VERSION"),
                 "mode": if b.is_bridge() { "bridge" } else { "headless" },
-                "commands": effectcraft_engine::command_specs().len(),
+                "commands": commands,
                 "effects": effectcraft_engine::effects::registry().len(),
                 "project": p,
                 "activeComp": comp,
@@ -1149,7 +1150,7 @@ fn bench_gpu(s: &Session, args: &Args) -> Result<(), Failure> {
     // Every comp, plus an adjustment-layer comp built for the benchmark (the main comp under a
     // full-frame adjustment layer with a GPU effect stack) and an Advanced 3D comp (`--adv3d`:
     // that one only).
-    let mut project = (*s.project).clone();
+    let mut project = (**s.project).clone();
     project.settings.gpu_acceleration = true;
     let comps: Vec<ItemId> = match args.opt("--comp") {
         _ if args.flag("--adv3d") => adv3d_bench_comp(&mut project).into_iter().collect(),

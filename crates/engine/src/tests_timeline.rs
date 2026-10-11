@@ -424,7 +424,7 @@ fn time_set_keeps_the_frame_shown_in_the_current_time_field() {
     assert_eq!((r["frame"].as_i64(), r["time"].as_f64()), (Some(0), Some(0.0)));
 
     s.execute("file.projectSettings", json!({"timeDisplay": "frames"})).unwrap();
-    std::sync::Arc::make_mut(&mut s.project).settings.frame_start = 1;
+    s.project_mut().settings.frame_start = 1;
     let r = s.execute("time.set", json!({"frame": 12})).unwrap();
     assert_eq!(r["display"], "00013");
     let r = s.execute("time.set", json!({"timecode": "00013"})).unwrap();

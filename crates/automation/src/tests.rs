@@ -874,7 +874,7 @@ fn render_panic_is_an_error_and_session_remains_usable() {
     }
     let mut session = Session { footage: Arc::new(BrokenFootage(Mutex::new(true))), ..Default::default() };
     session.execute("comp.new", json!({"width":16,"height":16})).unwrap();
-    let item = Arc::make_mut(&mut session.project).add_item(
+    let item = session.project_mut().add_item(
         "synthetic",
         Label::Aqua,
         None,

@@ -4,7 +4,7 @@
 //! ([`Doc`]): groups with transforms and opacity, and shapes with fills and strokes in their own
 //! user space. [`rasterize`] draws it at any scale; the engine converts it to shape layers.
 
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable))]
 
 mod color;
 mod pathdata;

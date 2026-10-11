@@ -7,7 +7,7 @@
 //! out as straight (unpremultiplied) RGBA `f32` in 0..1, display-encoded (32-bit documents,
 //! which are linear, are encoded to sRGB).
 
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable))]
 
 pub mod descriptor;
 pub mod engine_data;

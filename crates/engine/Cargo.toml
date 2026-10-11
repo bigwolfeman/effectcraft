@@ -37,3 +37,7 @@ rayon = { workspace = true }
 image = { workspace = true }
 web-time = { workspace = true }
 exr = { workspace = true }
+craft-command = { workspace = true }
+
+[dev-dependencies]
+craft-command = { workspace = true, features = ["testing"] }

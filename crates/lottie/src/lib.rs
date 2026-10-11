@@ -18,7 +18,7 @@
 //! Keyframe times in Lottie are frames of the layer's local time, which is EffectCraft's layer
 //! time; layer `ip`/`op`/`st` are composition frames and `sr` is the stretch factor.
 
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable))]
 
 mod anim;
 mod base64;

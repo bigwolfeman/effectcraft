@@ -593,19 +593,22 @@ impl Session {
         let st = job.progress();
         if let Some(e) = &st.error {
             self.events.push(Event::Toast { message: format!("Roto Brush: {e}"), error: true });
-            self.bump();
+            let hooks = self.hooks.clone();
+            hooks.with_cause(craft_command::Cause::Job("roto"), || self.bump());
             return true;
         }
         if st.cancelled {
             self.events.push(Event::Toast { message: "Roto Brush: stopped".into(), error: false });
-            self.bump();
+            let hooks = self.hooks.clone();
+            hooks.with_cause(craft_command::Cause::Job("roto"), || self.bump());
             return true;
         }
         match job.task {
             RotoTask::Propagate => {
                 self.events.push(Event::Toast { message: format!("Roto Brush: propagated {} frame(s) in {:.1} s", st.done, st.elapsed), error: false });
                 // Rendered frames depend on the cache: redraw.
-                self.bump();
+                let hooks = self.hooks.clone();
+                hooks.with_cause(craft_command::Cause::Job("roto"), || self.bump());
             }
             RotoTask::Freeze => {
                 let Some(fc) = lock(&job.shared.frozen).take() else { return true };

@@ -4,7 +4,7 @@
 //! ([`props`]). Compositions sit behind `Arc` so undo snapshots share everything that did not
 //! change.
 
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable))]
 
 pub mod build;
 pub mod essential;

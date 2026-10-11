@@ -8,7 +8,7 @@
 //!   (pixels/second), evaluated through an arc-length table.
 //! * Auto-Bezier and continuous-Bezier keys derive their tangents from their neighbours.
 
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable))]
 
 pub mod text_doc;
 pub mod value;

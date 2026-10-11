@@ -162,7 +162,8 @@ impl Session {
 
     /// The active shortcut preset resolved against every bindable command.
     pub fn shortcuts(&self) -> &ShortcutTable {
-        self.shortcut_table.get_or_init(|| ShortcutTable::build(&self.keymaps, &self.ui_commands))
+        // A plugin registered after the first shortcuts() call is invisible until shortcuts_changed() clears the cache.
+        self.shortcut_table.get_or_init(|| ShortcutTable::build(&self.keymaps, &self.ui_commands, &self.registry))
     }
 
     /// Remember a project in File ▸ Open Recent and in the crash-recovery sentinel.

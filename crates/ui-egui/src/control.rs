@@ -187,10 +187,12 @@ pub fn handle(app: &mut EffectcraftApp, ctx: &egui::Context, req: &ControlReques
                 }
             }
         }
-        "engine.commands" => match app.session.execute("command.list", json!({"filter": p.get("filter"), "enabledOnly": p.get("enabledOnly")})) {
-            Ok(v) => ok(v),
-            Err(e) => err(e),
-        },
+        "engine.commands" => {
+            match app.session.execute("command.list", json!({"filter": p.get("filter"), "enabledOnly": p.get("enabledOnly"), "schemas": true})) {
+                Ok(v) => ok(v),
+                Err(e) => err(e),
+            }
+        }
         "ui.menu.list" => ok(serde_json::to_value(crate::menus::menu_items(app)).unwrap_or_default()),
         "ui.inspect" => ok(inspect(app, ctx)),
         "ui.elements" => {

@@ -75,7 +75,7 @@ fn batch(s: &mut Session, p: &Value) -> Result<Value> {
             Err(e) => {
                 let id = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).unwrap_or("?");
                 let note = if atomic {
-                    s.project = project;
+                    s.set_project(project);
                     s.history = history;
                     s.state = state;
                     s.sanitize_state();

@@ -240,7 +240,7 @@ pub fn finish(app: &mut EffectcraftApp, ok: bool) {
         && !ok
     {
         let changed = !std::sync::Arc::ptr_eq(&app.session.project, &checkpoint.project);
-        app.session.project = checkpoint.project;
+        app.session.set_project(checkpoint.project);
         app.session.history = checkpoint.history;
         app.session.sanitize_state();
         if changed {

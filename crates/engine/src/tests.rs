@@ -321,7 +321,7 @@ fn save_and_open_roundtrip() {
     let before = s.project.clone();
     let mut s2 = Session::default();
     s2.execute("file.open", json!({"path": path})).unwrap();
-    assert_eq!(*before, *s2.project);
+    assert_eq!(*before, **s2.project);
     let _ = std::fs::remove_dir_all(dir);
 }
 

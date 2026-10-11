@@ -99,9 +99,9 @@ fn stereo_rig_builds_eye_comps_and_glasses() {
     assert_eq!(g.get("leftView").unwrap().value, KV::Layer(Some(l)));
     assert_eq!(g.get("rightView").unwrap().value, KV::Layer(Some(rr)));
     // One undo step; redo; serde.
-    let json = serde_json::to_string(&*s.project).unwrap();
+    let json = serde_json::to_string(&**s.project).unwrap();
     let back: Project = serde_json::from_str(&json).unwrap();
-    assert_eq!(back, *s.project);
+    assert_eq!(back, **s.project);
     s.execute("edit.undo", json!({})).unwrap();
     assert_eq!(s.project.items.len(), items_before);
     assert_eq!(s.project.comp(src).unwrap().layers.len(), 1);

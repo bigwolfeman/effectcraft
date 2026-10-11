@@ -191,7 +191,7 @@ fn material_commands_and_serde() {
     assert_eq!(s.execute("material.revealSource", json!({"layer": m})).unwrap()["item"], item);
     let json = s.project.to_json();
     let back = Project::from_json(&json).unwrap();
-    assert_eq!(&back, &*s.project);
+    assert_eq!(&back, &**s.project);
 }
 
 /// #264: only Advanced 3D draws models and primitives, and new comps are Classic 3D, so an

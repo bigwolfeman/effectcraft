@@ -203,7 +203,7 @@ fn opening_an_old_project_upgrades_effect_instances() {
             Some((first, rest)) => take(g.sub_mut(first)?, rest),
         }
     }
-    let mut old = (*s.project).clone();
+    let mut old = (**s.project).clone();
     let cid = s.active_comp_id().unwrap();
     {
         let comp = std::sync::Arc::make_mut(match &mut old.items.get_mut(&cid).unwrap().kind {

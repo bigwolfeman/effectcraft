@@ -8,7 +8,8 @@
 //! The project is an `Arc<Project>` edited copy-on-write; undo keeps whole-project snapshots
 //! (compositions are `Arc`s, so untouched comps are shared).
 
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable))]
+#![allow(clippy::disallowed_methods)]
 
 pub mod autosave;
 pub mod camera_track;
@@ -44,6 +45,7 @@ pub mod storage;
 pub mod sysinfo;
 pub mod templates;
 pub mod tracking;
+pub mod ui_ids;
 pub mod vector;
 pub mod viewer;
 pub mod warp;
@@ -90,6 +92,8 @@ pub enum EngineError {
     Project(#[from] effectcraft_project::ProjectError),
     #[error("{0}")]
     Other(String),
+    #[error(transparent)]
+    Command(#[from] craft_command::CommandError),
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;
@@ -353,7 +357,7 @@ pub enum Event {
 }
 
 pub struct Session {
-    pub project: Arc<Project>,
+    pub project: craft_command::Tracked<Arc<Project>>,
     pub history: History,
     pub revision: u64,
     pub saved_revision: u64,
@@ -483,6 +487,14 @@ pub struct Session {
     /// is, settings that guard what scripts may do can't change (see
     /// [`prefs::Scripting::same_permissions`]).
     pub script_calls: ScriptCalls,
+    /// Nesting depth of [`Session::execute`].
+    pub exec_depth: u32,
+    /// Monotonic id for [`craft_command::Call::seq`].
+    pub call_seq: u64,
+    /// Set by a merged edit, consumed by [`Session::bump`].
+    pub pending_merged: bool,
+    pub registry: craft_command::Registry<Session, EngineError>,
+    pub hooks: craft_command::Hooks<Session>,
 }
 
 /// The count behind [`Session::running_for_script`]; only the engine changes it.
@@ -510,12 +522,33 @@ pub type ScriptRunner = fn(&mut Session, &ScriptRequest) -> Value;
 /// describes it (`{id, name, category, version, api, params}`).
 pub type PluginLoader = fn(&[u8], &str) -> std::result::Result<Value, String>;
 
+struct SystemClock;
+
+/// Result class for a UI-only command. The egui crate does not name `craft_command`.
+pub enum UiOutcome {
+    Ok,
+    Err,
+    Panicked,
+}
+
+/// An open UI-only gate. [`Session::close_ui`] finishes it.
+pub struct UiGate {
+    info: craft_command::CallInfo,
+    pub params: Value,
+}
+
+impl craft_command::Clock for SystemClock {
+    fn now_ms(&self) -> u64 {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+    }
+}
+
 impl Default for Session {
     fn default() -> Self {
         let project = Arc::new(Project::default());
         Session {
-            saved_project: project.clone(),
-            project,
+            saved_project: Arc::clone(&project),
+            project: craft_command::Tracked::new(project),
             history: History::default(),
             revision: 0,
             saved_revision: 0,
@@ -576,6 +609,11 @@ impl Default for Session {
             footage_stamps: Default::default(),
             footage_scan: None,
             script_calls: ScriptCalls::default(),
+            exec_depth: 0,
+            call_seq: 0,
+            pending_merged: false,
+            registry: craft_command::Registry::new(commands::command_specs()),
+            hooks: craft_command::Hooks::new(),
         }
     }
 }
@@ -585,36 +623,210 @@ impl Session {
         Session::default()
     }
 
+    /// Mutable project. Marks the document dirty until [`Session::bump`].
+    pub fn project_mut(&mut self) -> &mut Project {
+        Arc::make_mut(self.project.write())
+    }
+
+    pub fn set_project(&mut self, project: Arc<Project>) {
+        *self.project.write() = project;
+    }
+
+    pub fn swap_project(&mut self, project: Arc<Project>) -> Arc<Project> {
+        std::mem::replace(self.project.write(), project)
+    }
+
     /// Run a command by id.
     pub fn execute(&mut self, id: &str, params: Value) -> Result<Value> {
-        let spec = commands::find(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
-        if let Err(why) = (spec.enabled)(self) {
-            // Explicit targets (agents, scripts) don't need a UI selection.
+        let Some(cmd) = self.registry.resolve(id) else {
+            return Err(EngineError::UnknownCommand(id.to_string()));
+        };
+        let origin = if self.running_for_script() { craft_command::Origin::Script } else { craft_command::Origin::Execute };
+        let id_arc: Arc<str> = Arc::from(id);
+        let hooks = self.hooks.clone();
+        let depth = self.exec_depth.saturating_add(1);
+        hooks.with_cause(craft_command::Cause::Command { id: Arc::clone(&id_arc), depth, origin }, || self.execute_resolved(id_arc, params, cmd, origin))
+    }
+
+    fn execute_resolved(
+        &mut self,
+        id: Arc<str>,
+        params: Value,
+        cmd: craft_command::CommandRef<'static, Session, EngineError>,
+        origin: craft_command::Origin,
+    ) -> Result<Value> {
+        let journal = match &cmd {
+            craft_command::CommandRef::Static(spec) => spec.journal,
+            craft_command::CommandRef::Dynamic(cmd) => cmd.journal,
+        };
+        let hooks = self.hooks.clone();
+        let clock = SystemClock;
+        let mut call = craft_command::Call { id: Arc::clone(&id), params, depth: self.exec_depth.saturating_add(1), origin, seq: self.call_seq };
+        self.call_seq = self.call_seq.saturating_add(1);
+        // Nested execute does not flush. An inner flush would report a write the outer command still bumps.
+        let verdict = hooks.before(self, &mut call, &clock);
+        let params = call.params.clone();
+        let info = call.info();
+        if let craft_command::Verdict::Veto { reason, by } = verdict {
+            return self.finish_call(&hooks, &info, craft_command::Outcome::Vetoed, Err(craft_command::CommandError::Vetoed { reason, by }.into()));
+        }
+        if let Err(why) = self.command_enabled(&cmd) {
             let explicit = (["layer", "layers", "prop", "keys"].iter().any(|k| params.get(k).is_some()) && commands::has_comp(self).is_ok())
                 || ["item", "items"].iter().any(|k| params.get(k).is_some())
-                // An explicit composition (the enablement looks at the active one).
                 || params.get("comp").is_some_and(|c| !c.is_null() && self.resolve_comp(Some(c)).is_ok());
             if !explicit {
-                return Err(EngineError::Disabled(id.to_string(), why));
+                return self.finish_call(&hooks, &info, craft_command::Outcome::Disabled, Err(EngineError::Disabled(id.to_string(), why)));
             }
         }
-        // Last-resort guard: a panicking command reports an error instead of crashing the app.
-        let r = guard::guarded(&format!("command `{id}`"), || (spec.run)(self, &params))?;
-        self.learn_observe(id, &params);
-        if spec.journal {
-            self.journal.push((id.to_string(), params));
-            if self.journal.len() > 10_000 {
-                self.journal.drain(..1000);
+        self.exec_depth += 1;
+        let _depth = hooks.enter();
+        let ran = guard::guarded(&format!("command `{id}`"), || self.run_resolved(&cmd, &params));
+        self.exec_depth -= 1;
+        let _depth = hooks.leave();
+        let (outcome, result) = match ran {
+            Ok(value) => (craft_command::Outcome::Ok, Ok(value)),
+            Err(err) => (craft_command::Outcome::Err, Err(err)),
+        };
+        if result.is_ok() {
+            self.learn_observe(id.as_ref(), &params);
+            if journal {
+                self.journal.push((id.to_string(), params));
+                if self.journal.len() > 10_000 {
+                    self.journal.drain(..1000);
+                }
             }
         }
-        Ok(r)
+        self.finish_call(&hooks, &info, outcome, result)
+    }
+
+    fn finish_call(
+        &mut self,
+        hooks: &craft_command::Hooks<Session>,
+        info: &craft_command::CallInfo,
+        outcome: craft_command::Outcome,
+        result: Result<Value>,
+    ) -> Result<Value> {
+        hooks.after(info, &outcome, &SystemClock);
+        if self.exec_depth == 0 {
+            hooks.flush(&mut self.project, self.revision);
+        }
+        result
+    }
+
+    /// Gate a command `execute` does not resolve. A veto returns `Err` after `after` has run.
+    /// The caller runs the UI body, then [`Session::close_ui`]. Nested `execute` does not flush
+    /// until this gate closes and `exec_depth` is 0.
+    pub fn open_ui(&mut self, id: &str, params: &Value) -> std::result::Result<UiGate, String> {
+        let hooks = self.hooks.clone();
+        self.call_seq = self.call_seq.saturating_add(1);
+        let mut call = craft_command::Call {
+            id: Arc::from(id),
+            params: params.clone(),
+            depth: self.exec_depth.saturating_add(1),
+            origin: craft_command::Origin::Ui,
+            seq: self.call_seq,
+        };
+        let verdict = hooks.before(self, &mut call, &SystemClock);
+        let info = call.info();
+        if let craft_command::Verdict::Veto { reason, by } = verdict {
+            let err = craft_command::CommandError::Vetoed { reason, by };
+            let message = err.to_string();
+            let _ = self.finish_call(&hooks, &info, craft_command::Outcome::Vetoed, Err(err.into()));
+            return Err(message);
+        }
+        self.exec_depth = self.exec_depth.saturating_add(1);
+        let _depth = hooks.enter();
+        Ok(UiGate { info, params: call.params })
+    }
+
+    /// Pair of [`Session::open_ui`]. `after` runs, then `flush` when this call is the outermost one.
+    pub fn close_ui(&mut self, gate: UiGate, outcome: UiOutcome) {
+        let hooks = self.hooks.clone();
+        self.exec_depth = self.exec_depth.saturating_sub(1);
+        let _depth = hooks.leave();
+        let outcome = match outcome {
+            UiOutcome::Ok => craft_command::Outcome::Ok,
+            UiOutcome::Err => craft_command::Outcome::Err,
+            UiOutcome::Panicked => craft_command::Outcome::Panicked,
+        };
+        let _ = self.finish_call(&hooks, &gate.info, outcome, Ok(Value::Null));
+    }
+
+    /// Dynamic commands that have a menu path. Static menu rows stay in `menus::entries`.
+    pub fn dynamic_menu_rows(&self) -> Vec<(String, String, Vec<String>)> {
+        let mut rows = Vec::new();
+        self.registry.for_each(|view| {
+            if !view.dynamic {
+                return;
+            }
+            let path = match view.menu {
+                craft_command::Menu::Static(parts) => parts.iter().map(|part| (*part).to_string()).collect::<Vec<_>>(),
+                craft_command::Menu::Shared(parts) => parts.iter().map(|part| part.to_string()).collect(),
+            };
+            if path.is_empty() {
+                return;
+            }
+            rows.push((view.id.to_string(), view.label.to_string(), path));
+        });
+        rows
+    }
+
+    /// Journaled commands with an empty menu and an empty params doc. The command palette adds these.
+    pub fn palette_commands(&self) -> Vec<(String, String, Option<String>)> {
+        let mut rows = Vec::new();
+        self.registry.for_each(|view| {
+            let empty_menu = match view.menu {
+                craft_command::Menu::Static(parts) => parts.is_empty(),
+                craft_command::Menu::Shared(parts) => parts.is_empty(),
+            };
+            if empty_menu && view.journal && view.params == "{}" {
+                rows.push((view.id.to_string(), view.label.to_string(), view.shortcut.map(str::to_string)));
+            }
+        });
+        rows
+    }
+
+    /// Built-in rows plus dynamic rows.
+    pub fn command_count(&self) -> usize {
+        let mut count = 0usize;
+        self.registry.for_each(|_| count += 1);
+        count
+    }
+
+    fn command_enabled(&self, cmd: &craft_command::CommandRef<'static, Session, EngineError>) -> std::result::Result<(), String> {
+        match cmd {
+            craft_command::CommandRef::Static(spec) => (spec.enabled)(self),
+            craft_command::CommandRef::Dynamic(cmd) => match &cmd.enablement {
+                // The session always holds a project. HasDocument means a comp is open.
+                craft_command::Enablement::Always => Ok(()),
+                craft_command::Enablement::HasDocument => commands::has_comp(self),
+                craft_command::Enablement::HasSelection => {
+                    if commands::has_layers(self).is_ok() || commands::has_project_selection(self).is_ok() {
+                        Ok(())
+                    } else {
+                        Err("nothing selected".into())
+                    }
+                }
+                craft_command::Enablement::Cached(state) => state.clone(),
+            },
+        }
+    }
+
+    fn run_resolved(&mut self, cmd: &craft_command::CommandRef<'static, Session, EngineError>, params: &Value) -> Result<Value> {
+        match cmd {
+            craft_command::CommandRef::Static(spec) => (spec.run)(self, params),
+            craft_command::CommandRef::Dynamic(cmd) => (cmd.run)(self, params),
+        }
     }
 
     /// [`Session::execute`] for agents and scripts (MCP, CLI, control channel): unknown top-level
     /// parameters are rejected with the accepted keys instead of being silently ignored.
     pub fn execute_checked(&mut self, id: &str, params: Value) -> Result<Value> {
-        let spec = commands::find(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
-        commands::check_params(spec, &params)?;
+        match self.registry.resolve(id) {
+            Some(craft_command::CommandRef::Static(spec)) => commands::check_params(spec, &params)?,
+            Some(craft_command::CommandRef::Dynamic(cmd)) => commands::check_params_doc(cmd.id.as_ref(), cmd.params.as_ref(), &params)?,
+            None => return Err(EngineError::UnknownCommand(id.to_string())),
+        }
         self.execute(id, params)
     }
 
@@ -635,13 +847,13 @@ impl Session {
     }
 
     pub fn is_enabled(&self, id: &str) -> bool {
-        commands::find(id).is_some_and(|c| (c.enabled)(self).is_ok())
+        self.registry.resolve(id).is_some_and(|cmd| self.command_enabled(&cmd).is_ok())
     }
 
     /// Apply an undoable edit. `merge`: consecutive edits with the same key fold into one step.
     pub fn edit<T>(&mut self, label: &str, merge: Option<&str>, f: impl FnOnce(&mut Project, &mut EditorState) -> Result<T>) -> Result<T> {
-        let before = self.project.clone();
-        let mut p = (*self.project).clone();
+        let before = Arc::clone(&self.project);
+        let mut p = (**self.project).clone();
         let mut st = self.state.clone();
         let r = f(&mut p, &mut st)?;
         // Layer styles: one Global Light per comp, whichever layer edited it.
@@ -680,8 +892,9 @@ impl Session {
             self.history.abandon_redo(&before);
         }
         self.history.merge_key = merge.map(str::to_string);
-        self.project = Arc::new(p);
+        self.set_project(Arc::new(p));
         self.state = st;
+        self.pending_merged = same;
         self.bump();
         Ok(r)
     }
@@ -696,26 +909,39 @@ impl Session {
             self.layer_cache.set_disk_salt(effectcraft_render::disk_cache::footage_salt(&self.project));
         }
         self.events.push(Event::ProjectChanged { revision: self.revision });
+        let merged = self.pending_merged;
+        self.pending_merged = false;
+        let hooks = self.hooks.clone();
+        let cause = hooks.current_cause();
+        let snapshot = Arc::clone(&self.project);
+        hooks.changed(self.revision, cause, merged, snapshot);
+        self.project.mark_bumped();
     }
 
     pub fn undo(&mut self) -> bool {
-        let Some((label, p)) = self.history.undo.pop() else { return false };
-        let cur = std::mem::replace(&mut self.project, p);
-        self.history.redo.push((label, cur));
-        self.history.merge_key = None;
-        self.sanitize_state();
-        self.bump();
-        true
+        let hooks = self.hooks.clone();
+        hooks.with_cause(craft_command::Cause::Undo, || {
+            let Some((label, p)) = self.history.undo.pop() else { return false };
+            let cur = self.swap_project(p);
+            self.history.redo.push((label, cur));
+            self.history.merge_key = None;
+            self.sanitize_state();
+            self.bump();
+            true
+        })
     }
 
     pub fn redo(&mut self) -> bool {
-        let Some((label, p)) = self.history.redo.pop() else { return false };
-        let cur = std::mem::replace(&mut self.project, p);
-        self.history.undo.push((label, cur));
-        self.history.merge_key = None;
-        self.sanitize_state();
-        self.bump();
-        true
+        let hooks = self.hooks.clone();
+        hooks.with_cause(craft_command::Cause::Redo, || {
+            let Some((label, p)) = self.history.redo.pop() else { return false };
+            let cur = self.swap_project(p);
+            self.history.undo.push((label, cur));
+            self.history.merge_key = None;
+            self.sanitize_state();
+            self.bump();
+            true
+        })
     }
 
     /// Drop selections that no longer exist.
@@ -982,11 +1208,12 @@ impl Session {
         self.drop_tasks();
         p.fix_next_id();
         upgrade_effects(&mut p);
-        self.project = Arc::new(p);
+        self.set_project(Arc::new(p));
         self.history = History::default();
         self.state = EditorState { snapping: true, view_layout: 1, ..Default::default() };
         self.path = path;
-        self.bump();
+        let hooks = self.hooks.clone();
+        hooks.with_cause(craft_command::Cause::Load, || self.bump());
         self.mark_saved();
         let first = self.project.comps().next().map(|(id, _)| *id);
         if let Some(c) = first {
